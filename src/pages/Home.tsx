@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
-import { currentUser, partners, restaurants, viralFoods } from "@/data/sampleData";
+import { currentUser, partners, restaurants } from "@/data/sampleData";
+import { useViralFoods } from "@/hooks/useViralFoods";
+import { useCommunityViralFoods } from "@/hooks/useCommunityViralFoods";
+import { ViralFoodSubmitDrawer } from "@/components/ViralFoodSubmitDrawer";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2Icon, MapPinIcon, UtensilsIcon, ZapIcon, ShoppingBagIcon, ChevronRightIcon, FlameIcon } from "lucide-react";
+import { CheckCircle2Icon, MapPinIcon, UtensilsIcon, ZapIcon, ShoppingBagIcon, ChevronRightIcon, FlameIcon, PlusIcon } from "lucide-react";
 import { useInvite } from "@/context/InviteContext";
 import { useRestaurant } from "@/context/RestaurantContext";
 import { Button } from "@/components/ui/button";
@@ -62,6 +65,10 @@ export default function Home() {
   const { openInvite } = useInvite();
   const { openRestaurant } = useRestaurant();
   const [, setLocation] = useLocation();
+  const { data: viralFoods = [] } = useViralFoods();
+  const { data: communityViralFoods = [] } = useCommunityViralFoods();
+  const [isSubmitDrawerOpen, setIsSubmitDrawerOpen] = useState(false);
+  const allViralFoods = [...communityViralFoods, ...viralFoods];
 
   const filteredPartners = partners.filter(p =>
     genderFilter === "semua" ? true : p.gender === genderFilter
@@ -233,25 +240,45 @@ export default function Home() {
       <div className="mx-5 border-t border-border" />
 
       <section className="flex flex-col gap-1">
-        <div className="px-5 mb-3">
-          <div className="flex items-center gap-2 mb-0.5">
-            <FlameIcon className="w-5 h-5 text-primary" />
-            <h3 className="font-serif text-xl font-semibold">Makanan viral sekarang</h3>
+        <div className="px-5 mb-3 flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2 mb-0.5">
+              <FlameIcon className="w-5 h-5 text-primary" />
+              <h3 className="font-serif text-xl font-semibold">Makanan viral sekarang</h3>
+            </div>
+            <p className="text-xs text-muted-foreground">Lagi rame diperbincangkan · dari YouTube & warga Sepiring</p>
           </div>
-          <p className="text-xs text-muted-foreground">Lagi rame diperbincangkan di Jakarta</p>
+          <button
+            onClick={() => setIsSubmitDrawerOpen(true)}
+            className="shrink-0 flex items-center justify-center w-9 h-9 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+            aria-label="Tambah makanan viral"
+            data-testid="button-open-add-viral-food"
+          >
+            <PlusIcon className="w-5 h-5" />
+          </button>
         </div>
         <div className="flex gap-3 overflow-x-auto pb-4 snap-x px-5 hide-scrollbar">
-          {viralFoods.map(food => (
-            <div
+          {allViralFoods.map(food => {
+            const CardTag = food.videoUrl ? "a" : "div";
+            const imageSrc = food.image ? (food.image.startsWith("http") ? food.image : imageMap[food.image]) : undefined;
+            return (
+            <CardTag
               key={food.id}
               className="bg-card rounded-2xl border border-border shadow-sm min-w-[180px] max-w-[180px] snap-center shrink-0 flex flex-col overflow-hidden"
+              {...(food.videoUrl ? { href: food.videoUrl, target: "_blank", rel: "noopener noreferrer" } : {})}
             >
               <div className="relative h-28 bg-muted overflow-hidden">
-                <img
-                  src={imageMap[food.image]}
-                  alt={food.name}
-                  className="w-full h-full object-cover"
-                />
+                {imageSrc ? (
+                  <img
+                    src={imageSrc}
+                    alt={food.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-primary/10 to-muted">
+                    <UtensilsIcon className="w-8 h-8 text-primary/50" />
+                  </div>
+                )}
                 <div className="absolute top-2 left-2 flex items-center gap-0.5 bg-background/80 backdrop-blur-sm rounded-full px-2 py-0.5">
                   {Array.from({ length: food.heat }).map((_, i) => (
                     <FlameIcon key={i} className="w-3 h-3 text-primary" />
@@ -267,8 +294,9 @@ export default function Home() {
                   {food.tag}
                 </span>
               </div>
-            </div>
-          ))}
+            </CardTag>
+            );
+          })}
         </div>
       </section>
 
@@ -318,6 +346,7 @@ export default function Home() {
       </section>
 
       <style dangerouslySetInnerHTML={{ __html: `.hide-scrollbar::-webkit-scrollbar{display:none}.hide-scrollbar{-ms-overflow-style:none;scrollbar-width:none}` }} />
+      <ViralFoodSubmitDrawer open={isSubmitDrawerOpen} onOpenChange={setIsSubmitDrawerOpen} />
     </div>
   );
 }

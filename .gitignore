@@ -3,3 +3,6 @@ dist
 .vercel
 *.tsbuildinfo
 .DS_Store
+.env
+.env.*
+!.env.example
