@@ -1,7 +1,27 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sql, ensureViralFoodTable } from "../lib/db";
+import { sql } from "@vercel/postgres";
 
 const MAX_LEN = { name: 80, origin: 80, area: 60, tag: 60, submittedBy: 60 };
+
+let tableReady: Promise<unknown> | null = null;
+
+function ensureViralFoodTable() {
+  if (!tableReady) {
+    tableReady = sql`
+      CREATE TABLE IF NOT EXISTS community_viral_foods (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        area TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        heat SMALLINT NOT NULL DEFAULT 1,
+        submitted_by TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `;
+  }
+  return tableReady;
+}
 
 function clean(value: unknown, maxLen: number, fallback = ""): string {
   const str = typeof value === "string" ? value.trim() : "";
