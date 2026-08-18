@@ -21,8 +21,7 @@ export function useCommunityViralFoods() {
   return useQuery({
     queryKey: ["community-viral-foods"],
     queryFn: fetchCommunityViralFoods,
-    initialData: [],
-    staleTime: 60 * 1000,
+    staleTime: 0,
     retry: 1,
   });
 }

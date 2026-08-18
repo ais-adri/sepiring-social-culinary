@@ -48,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ORDER BY created_at DESC
         LIMIT 30
       `;
-      res.setHeader("Cache-Control", "s-maxage=15, stale-while-revalidate=120");
+      res.setHeader("Cache-Control", "no-store");
       res.status(200).json({ items: rows });
       return;
     }
