@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sepiring",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "triggers": {
+    // Crawl YouTube + Google News for viral food every 6 hours and store it in D1.
+    "crons": ["0 */6 * * *"]
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sepiring-db",
+      // Replace with the id printed by `npx wrangler d1 create sepiring-db`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
