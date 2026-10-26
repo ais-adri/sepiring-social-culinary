@@ -3,6 +3,10 @@
   "name": "sepiring",
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-01",
+  "triggers": {
+    // Crawl YouTube for viral food videos every 6 hours and store them in D1.
+    "crons": ["0 */6 * * *"]
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",

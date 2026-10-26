@@ -7,6 +7,13 @@ export interface Env {
 const YOUTUBE_SEARCH_URL = "https://www.googleapis.com/youtube/v3/search";
 const YOUTUBE_VIDEOS_URL = "https://www.googleapis.com/youtube/v3/videos";
 const DEFAULT_QUERY = "makanan viral indonesia";
+// Keywords crawled on every scheduled run. Each search costs 100 YouTube quota units.
+const CRAWL_QUERIES = [
+  DEFAULT_QUERY,
+  "jajanan viral",
+  "kuliner viral indonesia",
+  "street food viral indonesia",
+];
 const MAX_RESULTS = 12;
 const LOOKBACK_DAYS = 21;
 
@@ -21,6 +28,24 @@ type ViralFoodItem = {
   tag: string;
   image: string;
   videoUrl: string;
+};
+
+type YouTubeVideo = {
+  videoId: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  viewCount: number;
+  publishedAt: string;
+};
+
+type ViralFoodRow = {
+  video_id: string;
+  title: string;
+  channel: string;
+  thumbnail: string;
+  video_url: string;
+  view_count: number;
 };
 
 function json(body: unknown, status = 200, headers: HeadersInit = {}): Response {
@@ -48,88 +73,190 @@ function clean(value: unknown, maxLen: number, fallback = ""): string {
   return (str || fallback).slice(0, maxLen);
 }
 
-async function viralFoods(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  const apiKey = env.YOUTUBE_API_KEY;
-  if (!apiKey) {
-    return json({ source: "fallback", items: [], reason: "missing_api_key" });
-  }
+function lookbackDate(): string {
+  return new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+}
 
-  // Cache successful YouTube responses at the edge to save API quota.
-  const cache = caches.default;
-  const cacheKey = new Request(request.url, { method: "GET" });
-  const cached = await cache.match(cacheKey);
-  if (cached) return cached;
+function toItem(
+  video: { id: string; title: string; channel: string; thumbnail: string; viewCount: number },
+  index: number,
+  total: number
+): ViralFoodItem {
+  return {
+    id: video.id,
+    name: video.title,
+    origin: video.channel,
+    area: "YouTube",
+    heat: heatFromRank(index, total),
+    tag: `🔥 ${formatViews(video.viewCount)}`,
+    image: video.thumbnail,
+    videoUrl: `https://www.youtube.com/watch?v=${video.id}`,
+  };
+}
+
+// Most-viewed recent food videos for a query, sorted by view count.
+async function searchYouTube(apiKey: string, query: string): Promise<YouTubeVideo[]> {
+  const searchParams = new URLSearchParams({
+    key: apiKey,
+    part: "snippet",
+    type: "video",
+    q: query,
+    order: "viewCount",
+    regionCode: "ID",
+    relevanceLanguage: "id",
+    publishedAfter: lookbackDate(),
+    maxResults: String(MAX_RESULTS),
+  });
+
+  const searchRes = await fetch(`${YOUTUBE_SEARCH_URL}?${searchParams.toString()}`);
+  if (!searchRes.ok) {
+    throw new Error(`YouTube search failed: ${searchRes.status}`);
+  }
+  const searchData: any = await searchRes.json();
+  const videoIds: string[] = (searchData.items ?? [])
+    .map((item: any) => item.id?.videoId)
+    .filter(Boolean);
+  if (videoIds.length === 0) return [];
+
+  const videosParams = new URLSearchParams({
+    key: apiKey,
+    part: "snippet,statistics",
+    id: videoIds.join(","),
+  });
+
+  const videosRes = await fetch(`${YOUTUBE_VIDEOS_URL}?${videosParams.toString()}`);
+  if (!videosRes.ok) {
+    throw new Error(`YouTube videos lookup failed: ${videosRes.status}`);
+  }
+  const videosData: any = await videosRes.json();
+
+  return (videosData.items ?? [])
+    .map((video: any) => ({
+      videoId: video.id,
+      title: video.snippet?.title ?? "Video makanan viral",
+      channel: video.snippet?.channelTitle ?? "YouTube",
+      thumbnail: video.snippet?.thumbnails?.medium?.url ?? video.snippet?.thumbnails?.default?.url ?? "",
+      viewCount: Number(video.statistics?.viewCount ?? 0),
+      publishedAt: video.snippet?.publishedAt ?? new Date().toISOString(),
+    }))
+    .sort((a: YouTubeVideo, b: YouTubeVideo) => b.viewCount - a.viewCount);
+}
+
+// Crawl every keyword and upsert the videos into D1. Returns how many rows were written.
+async function collectViralFoods(env: Env): Promise<number> {
+  if (!env.YOUTUBE_API_KEY || !env.DB) return 0;
+  const db = env.DB;
+
+  const upsert = db.prepare(
+    `INSERT INTO viral_foods (video_id, title, channel, thumbnail, video_url, view_count, published_at, search_query)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (video_id) DO UPDATE SET
+       title = excluded.title,
+       channel = excluded.channel,
+       thumbnail = excluded.thumbnail,
+       view_count = excluded.view_count,
+       last_seen_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+  );
+
+  let written = 0;
+  for (const query of CRAWL_QUERIES) {
+    try {
+      const videos = await searchYouTube(env.YOUTUBE_API_KEY, query);
+      if (videos.length === 0) continue;
+      await db.batch(
+        videos.map((v) =>
+          upsert.bind(
+            v.videoId,
+            v.title,
+            v.channel,
+            v.thumbnail,
+            `https://www.youtube.com/watch?v=${v.videoId}`,
+            v.viewCount,
+            v.publishedAt,
+            query
+          )
+        )
+      );
+      written += videos.length;
+    } catch (error) {
+      console.error(`Crawl failed for "${query}":`, (error as Error).message);
+    }
+  }
+  return written;
+}
+
+async function readViralFoodsFromDb(db: D1Database): Promise<ViralFoodItem[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT video_id, title, channel, thumbnail, video_url, view_count
+       FROM viral_foods
+       WHERE published_at >= ?
+       ORDER BY view_count DESC
+       LIMIT ?`
+    )
+    .bind(lookbackDate(), MAX_RESULTS)
+    .all<ViralFoodRow>();
+  return results.map((row, index) =>
+    toItem(
+      { id: row.video_id, title: row.title, channel: row.channel, thumbnail: row.thumbnail, viewCount: row.view_count },
+      index,
+      results.length
+    )
+  );
+}
+
+async function viralFoods(request: Request, env: Env): Promise<Response> {
+  const cacheHeaders = { "Cache-Control": "public, max-age=600" };
 
   try {
-    const q = new URL(request.url).searchParams.get("q")?.trim();
-    const query = q || DEFAULT_QUERY;
-    const publishedAfter = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
-
-    const searchParams = new URLSearchParams({
-      key: apiKey,
-      part: "snippet",
-      type: "video",
-      q: query,
-      order: "viewCount",
-      regionCode: "ID",
-      relevanceLanguage: "id",
-      publishedAfter,
-      maxResults: String(MAX_RESULTS),
-    });
-
-    const searchRes = await fetch(`${YOUTUBE_SEARCH_URL}?${searchParams.toString()}`);
-    if (!searchRes.ok) {
-      throw new Error(`YouTube search failed: ${searchRes.status}`);
+    if (env.DB) {
+      let items = await readViralFoodsFromDb(env.DB);
+      // First request after deploy: the cron hasn't run yet, so crawl now.
+      if (items.length === 0 && (await collectViralFoods(env)) > 0) {
+        items = await readViralFoodsFromDb(env.DB);
+      }
+      if (items.length > 0) return json({ source: "database", items }, 200, cacheHeaders);
     }
-    const searchData: any = await searchRes.json();
-    const videoIds: string[] = (searchData.items ?? [])
-      .map((item: any) => item.id?.videoId)
-      .filter(Boolean);
 
-    if (videoIds.length === 0) {
+    if (!env.YOUTUBE_API_KEY) {
+      return json({ source: "fallback", items: [], reason: "missing_api_key" });
+    }
+
+    // No database bound: query YouTube live.
+    const q = new URL(request.url).searchParams.get("q")?.trim();
+    const videos = await searchYouTube(env.YOUTUBE_API_KEY, q || DEFAULT_QUERY);
+    if (videos.length === 0) {
       return json({ source: "fallback", items: [], reason: "no_results" });
     }
-
-    const videosParams = new URLSearchParams({
-      key: apiKey,
-      part: "snippet,statistics",
-      id: videoIds.join(","),
-    });
-
-    const videosRes = await fetch(`${YOUTUBE_VIDEOS_URL}?${videosParams.toString()}`);
-    if (!videosRes.ok) {
-      throw new Error(`YouTube videos lookup failed: ${videosRes.status}`);
-    }
-    const videosData: any = await videosRes.json();
-
-    const sorted = [...(videosData.items ?? [])].sort(
-      (a: any, b: any) => Number(b.statistics?.viewCount ?? 0) - Number(a.statistics?.viewCount ?? 0)
+    const items = videos.map((v, index) =>
+      toItem({ id: v.videoId, title: v.title, channel: v.channel, thumbnail: v.thumbnail, viewCount: v.viewCount }, index, videos.length)
     );
-
-    const items: ViralFoodItem[] = sorted.map((video: any, index: number) => {
-      const viewCount = Number(video.statistics?.viewCount ?? 0);
-      return {
-        id: video.id,
-        name: video.snippet?.title ?? "Video makanan viral",
-        origin: video.snippet?.channelTitle ?? "YouTube",
-        area: "YouTube",
-        heat: heatFromRank(index, sorted.length),
-        tag: `🔥 ${formatViews(viewCount)}`,
-        image: video.snippet?.thumbnails?.medium?.url ?? video.snippet?.thumbnails?.default?.url ?? "",
-        videoUrl: `https://www.youtube.com/watch?v=${video.id}`,
-      };
-    });
-
-    const response = json(
-      { source: "youtube", items },
-      200,
-      { "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400" }
-    );
-    ctx.waitUntil(cache.put(cacheKey, response.clone()));
-    return response;
+    return json({ source: "youtube", items }, 200, cacheHeaders);
   } catch (error) {
     return json({ source: "fallback", items: [], reason: "error", message: (error as Error).message });
   }
+}
+
+// Every stored video, newest-seen first, for browsing the collected database.
+async function viralFoodsArchive(request: Request, env: Env): Promise<Response> {
+  if (!env.DB) return json({ items: [], reason: "missing_database" });
+  const params = new URL(request.url).searchParams;
+  const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
+  const offset = Math.max(0, Number(params.get("offset")) || 0);
+
+  const [{ results }, total] = await Promise.all([
+    env.DB.prepare(
+      `SELECT video_id, title, channel, thumbnail, video_url, view_count, published_at,
+              search_query, first_seen_at, last_seen_at
+       FROM viral_foods
+       ORDER BY last_seen_at DESC, view_count DESC
+       LIMIT ? OFFSET ?`
+    )
+      .bind(limit, offset)
+      .all(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM viral_foods").first<number>("n"),
+  ]);
+  return json({ items: results, total: total ?? 0, limit, offset }, 200, { "Cache-Control": "no-store" });
 }
 
 async function communityViralFoods(request: Request, env: Env): Promise<Response> {
@@ -185,13 +312,20 @@ async function communityViralFoods(request: Request, env: Env): Promise<Response
 }
 
 export default {
-  async fetch(request, env, ctx): Promise<Response> {
+  async fetch(request, env): Promise<Response> {
     const { pathname } = new URL(request.url);
 
-    if (pathname === "/api/viral-foods") return viralFoods(request, env, ctx);
+    if (pathname === "/api/viral-foods") return viralFoods(request, env);
+    if (pathname === "/api/viral-foods/archive") return viralFoodsArchive(request, env);
     if (pathname === "/api/community-viral-foods") return communityViralFoods(request, env);
     if (pathname.startsWith("/api/")) return json({ error: "Not found" }, 404);
 
     return env.ASSETS.fetch(request);
+  },
+
+  async scheduled(_controller, env, ctx) {
+    ctx.waitUntil(
+      collectViralFoods(env).then((n) => console.log(`Stored ${n} viral food videos`))
+    );
   },
 } satisfies ExportedHandler<Env>;

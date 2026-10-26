@@ -13,7 +13,7 @@ export type ViralFood = {
 };
 
 type ViralFoodsResponse = {
-  source: "youtube" | "fallback";
+  source: "database" | "youtube" | "fallback";
   items: ViralFood[];
 };
 
