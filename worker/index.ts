@@ -1,3 +1,5 @@
+import { collectViralNews } from "./news";
+
 export interface Env {
   ASSETS: Fetcher;
   DB?: D1Database;
@@ -237,26 +239,43 @@ async function viralFoods(request: Request, env: Env): Promise<Response> {
   }
 }
 
-// Every stored video, newest-seen first, for browsing the collected database.
+const ARCHIVE_QUERIES = {
+  youtube: {
+    select: `SELECT video_id, title, channel, thumbnail, video_url, view_count, published_at,
+                    search_query, first_seen_at, last_seen_at
+             FROM viral_foods
+             ORDER BY last_seen_at DESC, view_count DESC
+             LIMIT ? OFFSET ?`,
+    count: "SELECT COUNT(*) AS n FROM viral_foods",
+  },
+  news: {
+    select: `SELECT article_id, title, publisher, publisher_url, url, published_at,
+                    search_query, first_seen_at, last_seen_at
+             FROM viral_food_news
+             ORDER BY published_at DESC
+             LIMIT ? OFFSET ?`,
+    count: "SELECT COUNT(*) AS n FROM viral_food_news",
+  },
+};
+
+// Everything stored in the database, for browsing. `source` is "youtube" (default) or "news".
 async function viralFoodsArchive(request: Request, env: Env): Promise<Response> {
-  if (!env.DB) return json({ items: [], reason: "missing_database" });
+  if (!env.DB) return json({ items: [], total: 0, reason: "missing_database" });
   const params = new URL(request.url).searchParams;
+  const source = params.get("source") === "news" ? "news" : "youtube";
   const limit = Math.min(100, Math.max(1, Number(params.get("limit")) || 50));
   const offset = Math.max(0, Number(params.get("offset")) || 0);
+  const queries = ARCHIVE_QUERIES[source];
 
-  const [{ results }, total] = await Promise.all([
-    env.DB.prepare(
-      `SELECT video_id, title, channel, thumbnail, video_url, view_count, published_at,
-              search_query, first_seen_at, last_seen_at
-       FROM viral_foods
-       ORDER BY last_seen_at DESC, view_count DESC
-       LIMIT ? OFFSET ?`
-    )
-      .bind(limit, offset)
-      .all(),
-    env.DB.prepare("SELECT COUNT(*) AS n FROM viral_foods").first<number>("n"),
-  ]);
-  return json({ items: results, total: total ?? 0, limit, offset }, 200, { "Cache-Control": "no-store" });
+  try {
+    const [{ results }, total] = await Promise.all([
+      env.DB.prepare(queries.select).bind(limit, offset).all(),
+      env.DB.prepare(queries.count).first<number>("n"),
+    ]);
+    return json({ source, items: results, total: total ?? 0, limit, offset }, 200, { "Cache-Control": "no-store" });
+  } catch (error) {
+    return json({ error: (error as Error).message }, 500);
+  }
 }
 
 async function communityViralFoods(request: Request, env: Env): Promise<Response> {
@@ -327,5 +346,10 @@ export default {
     ctx.waitUntil(
       collectViralFoods(env).then((n) => console.log(`Stored ${n} viral food videos`))
     );
+    if (env.DB) {
+      ctx.waitUntil(
+        collectViralNews(env.DB).then((n) => console.log(`Stored ${n} viral food news articles`))
+      );
+    }
   },
 } satisfies ExportedHandler<Env>;

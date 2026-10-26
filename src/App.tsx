@@ -15,6 +15,7 @@ import Wishlist from "@/pages/Wishlist";
 import PetaRasa from "@/pages/PetaRasa";
 import Profil from "@/pages/Profil";
 import Search from "@/pages/Search";
+import ViralArchive from "@/pages/ViralArchive";
 
 const queryClient = new QueryClient();
 
@@ -27,6 +28,7 @@ function Router() {
         <Route path="/peta-rasa" component={PetaRasa} />
         <Route path="/profil" component={Profil} />
         <Route path="/search" component={Search} />
+        <Route path="/viral" component={ViralArchive} />
         <Route component={NotFound} />
       </WouterSwitch>
       <InviteDrawer />

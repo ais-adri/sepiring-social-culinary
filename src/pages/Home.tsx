@@ -8,7 +8,7 @@ import { CheckCircle2Icon, MapPinIcon, UtensilsIcon, ZapIcon, ShoppingBagIcon, C
 import { useInvite } from "@/context/InviteContext";
 import { useRestaurant } from "@/context/RestaurantContext";
 import { Button } from "@/components/ui/button";
-import { useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { imageMap } from "@/assets/imageMap";
 
@@ -247,6 +247,13 @@ export default function Home() {
               <h3 className="font-serif text-xl font-semibold">Makanan viral sekarang</h3>
             </div>
             <p className="text-xs text-muted-foreground">Lagi rame diperbincangkan · dari YouTube & warga Sepiring</p>
+            <Link
+              href="/viral"
+              className="inline-flex items-center gap-0.5 text-xs font-semibold text-primary mt-1 hover:underline"
+              data-testid="link-viral-archive"
+            >
+              Lihat arsip <ChevronRightIcon className="w-3.5 h-3.5" />
+            </Link>
           </div>
           <button
             onClick={() => setIsSubmitDrawerOpen(true)}
