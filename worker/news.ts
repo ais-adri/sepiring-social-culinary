@@ -1,9 +1,11 @@
 // Viral food news collected from Google News RSS (free, no API key).
 
 const GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search";
-// Keywords crawled on every scheduled run. `when:7d` limits results to the last week.
+// Keywords crawled on every scheduled run.
 const NEWS_QUERIES = ["makanan viral", "kuliner viral", "jajanan viral"];
-const MAX_ARTICLES_PER_QUERY = 20;
+const MAX_ARTICLES_PER_QUERY = 50;
+// How far back to search (about two months), via Google News' `when:` operator.
+const LOOKBACK_DAYS = 60;
 
 export type NewsArticle = {
   articleId: string;
@@ -62,7 +64,7 @@ export function parseGoogleNewsRss(xml: string): NewsArticle[] {
 }
 
 async function searchGoogleNews(query: string): Promise<NewsArticle[]> {
-  const params = new URLSearchParams({ q: `${query} when:7d`, hl: "id", gl: "ID", ceid: "ID:id" });
+  const params = new URLSearchParams({ q: `${query} when:${LOOKBACK_DAYS}d`, hl: "id", gl: "ID", ceid: "ID:id" });
   const res = await fetch(`${GOOGLE_NEWS_RSS_URL}?${params.toString()}`, {
     headers: { "User-Agent": "Mozilla/5.0 (compatible; SepiringBot/1.0)" },
   });

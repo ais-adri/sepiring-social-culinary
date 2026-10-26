@@ -142,7 +142,7 @@ export default function ViralArchive() {
         </Link>
         <h2 className="font-serif text-3xl text-primary font-bold mb-2">Arsip Makanan Viral</h2>
         <p className="text-muted-foreground text-sm">
-          Kumpulan video dan berita kuliner viral yang dikumpulkan Sepiring dari internet, diperbarui tiap 6 jam.
+          Kumpulan video dan berita kuliner viral yang dikumpulkan Sepiring dari internet selama 2 bulan terakhir, diperbarui tiap 6 jam.
         </p>
       </section>
 

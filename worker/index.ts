@@ -16,8 +16,12 @@ const CRAWL_QUERIES = [
   "kuliner viral indonesia",
   "street food viral indonesia",
 ];
+// Videos shown on Beranda.
 const MAX_RESULTS = 12;
-const LOOKBACK_DAYS = 21;
+// Videos stored per keyword on each crawl. maxResults up to 50 costs the same quota.
+const CRAWL_RESULTS_PER_QUERY = 25;
+// How far back we collect and rank videos (about two months).
+const LOOKBACK_DAYS = 60;
 
 const MAX_LEN = { name: 80, origin: 80, area: 60, tag: 60, submittedBy: 60 };
 
@@ -107,7 +111,7 @@ async function searchYouTube(apiKey: string, query: string): Promise<YouTubeVide
     regionCode: "ID",
     relevanceLanguage: "id",
     publishedAfter: lookbackDate(),
-    maxResults: String(MAX_RESULTS),
+    maxResults: String(CRAWL_RESULTS_PER_QUERY),
   });
 
   const searchRes = await fetch(`${YOUTUBE_SEARCH_URL}?${searchParams.toString()}`);
@@ -226,7 +230,7 @@ async function viralFoods(request: Request, env: Env): Promise<Response> {
 
     // No database bound: query YouTube live.
     const q = new URL(request.url).searchParams.get("q")?.trim();
-    const videos = await searchYouTube(env.YOUTUBE_API_KEY, q || DEFAULT_QUERY);
+    const videos = (await searchYouTube(env.YOUTUBE_API_KEY, q || DEFAULT_QUERY)).slice(0, MAX_RESULTS);
     if (videos.length === 0) {
       return json({ source: "fallback", items: [], reason: "no_results" });
     }
